@@ -1,0 +1,24 @@
+# Data Manipulation and Utilities
+pandas
+numpy
+tqdm
+python-dotenv
+
+# google-play-scraper must be installed from git for the 'reviews_all' function
+# If the standard version doesn't work, use the github version:
+# git+https://github.com/JoMingyu/google-play-scraper.git
+
+# Web Scraping Library (Primary Tool)
+google-play-scraper
+
+# NLP and Machine Learning (for Task 2)
+scikit-learn
+nltk
+# Optional advanced NLP (based on 10 Academy materials)
+transformers
+sentence-transformers
+torch # Needed for transformers
+
+# Database (for Task 3)
+psycopg2-binary
+sqlalchemy

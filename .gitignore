@@ -1,0 +1,19 @@
+# Environment and dependencies
+.env
+venv/
+__pycache__/
+
+# Data files (crucial: raw and processed data should not be tracked by Git)
+data/
+*.csv
+*.xlsx
+*.parquet
+
+# Jupyter Notebook files
+.ipynb_checkpoints
+
+# IDE/System Files
+.idea/
+.vscode/
+*.log
+*.DS_Store
