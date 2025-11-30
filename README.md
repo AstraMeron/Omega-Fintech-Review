@@ -31,21 +31,25 @@ It is highly recommended to use a virtual environment:
 ```bash
 # Code block starts here:
 python -m venv venv
-```bash
+```
+
 # On Windows (use this command)
+```bash
 .\venv\Scripts\activate
-```bash
+```
+
 # On macOS/Linux (use this command)
-source venv/bin/activate
 ```bash
+source venv/bin/activate
+```
+
 
 ### Install Dependencies
 
 ```bash
-# Code block starts and ends here:
 pip install -r requirements.txt
-```bash
-## 🚀 Methodology and Pipeline
+```
+
 
 The project follows a standard data engineering and analysis pipeline across four main tasks:
 
