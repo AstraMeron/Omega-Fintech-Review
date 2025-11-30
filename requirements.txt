@@ -3,7 +3,8 @@ pandas
 numpy
 tqdm
 python-dotenv
-
+matplotlib 
+seaborn
 # google-play-scraper must be installed from git for the 'reviews_all' function
 # If the standard version doesn't work, use the github version:
 # git+https://github.com/JoMingyu/google-play-scraper.git
