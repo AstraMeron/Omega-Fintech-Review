@@ -21,9 +21,9 @@ By collecting user reviews from the Google Play Store, the project aims to provi
 ### Clone the Repository
 
 ```bash
-git clone [YOUR_REPOSITORY_URL]
+git clone [https://github.com/AstraMeron/Omega-Fintech-Review]
 cd Omega-Fintech-Review
-
+```bash
 ### Environment Setup
 
 It is highly recommended to use a virtual environment:
@@ -31,20 +31,20 @@ It is highly recommended to use a virtual environment:
 ```bash
 # Code block starts here:
 python -m venv venv
-
+```bash
 # On Windows (use this command)
 .\venv\Scripts\activate
-
+```bash
 # On macOS/Linux (use this command)
 source venv/bin/activate
-
+```bash
 
 ### Install Dependencies
 
 ```bash
 # Code block starts and ends here:
 pip install -r requirements.txt
-
+```bash
 ## 🚀 Methodology and Pipeline
 
 The project follows a standard data engineering and analysis pipeline across four main tasks:
