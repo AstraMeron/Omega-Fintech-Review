@@ -23,7 +23,8 @@ By collecting user reviews from the Google Play Store, the project aims to provi
 ```bash
 git clone [https://github.com/AstraMeron/Omega-Fintech-Review]
 cd Omega-Fintech-Review
-```bash
+```
+
 ### Environment Setup
 
 It is highly recommended to use a virtual environment:
