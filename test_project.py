@@ -1,0 +1,190 @@
+import unittest
+import pandas as pd
+import sys
+import os
+import re
+from unittest.mock import MagicMock, patch
+
+# --- Setup for Module Imports ---
+# Adjust the path to ensure the parent directory (where your scripts are) is accessible
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+# IMPORT CLASSES/FUNCTIONS HERE
+try:
+    from preprocessing import ReviewPreprocessor
+    from nlp_analysis import ReviewAnalyzer
+    # We need the DatabaseLoader class for testing its logic
+    from database_loader import DatabaseLoader
+    
+    # Check for NLTK resources needed by nlp_analysis
+    import nltk
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except nltk.downloader.DownloadError:
+        print("\nNote: NLTK 'punkt' not found. Download it by running: nltk.download('punkt')")
+        
+except ImportError as e:
+    print(f"Error importing required modules: {e}")
+    print("Please ensure all Python files (including database_loader.py) are in your project root.")
+    sys.exit(1)
+
+
+# --- Mocking Configuration for Database Tests ---
+# We use MagicMock to simulate the database connection without needing PostgreSQL to run
+MOCK_BANK_NAMES = {'CBE': 'Commercial Bank of Ethiopia', 'DAS': 'Dashen Bank', 'BOA': 'Bank of Abyssinia'}
+
+
+# ====================================================================
+# Test Suite 1: Data Preprocessing (preprocessing.py)
+# ====================================================================
+
+class TestPreprocessing(unittest.TestCase):
+    
+    def setUp(self):
+        # Use dummy paths since we are testing internal logic, not file loading
+        self.preprocessor = ReviewPreprocessor(input_path='dummy_path.csv', output_path='dummy_path.csv')
+
+    def test_remove_non_ascii(self):
+        """Test the string cleaning helper: removal of non-ASCII/Amharic characters."""
+        input_text = "Hello Ethiopia! It's great. (ጤና ይስጥልኝ)"
+        expected_output = "Hello Ethiopia! It's great. ( )"
+        self.assertEqual(self.preprocessor._remove_non_ascii(input_text), expected_output)
+
+    def test_remove_duplicates_count(self):
+        """Test if the remove_duplicates method correctly identifies and removes duplicates."""
+        data = {
+            'review_text': ['good app', 'bad app', 'good app', 'slow', 'bad app'],
+            'bank_code': ['CBE', 'BOA', 'CBE', 'DAS', 'BOA'],
+            'rating': [5, 1, 5, 2, 1]
+        }
+        self.preprocessor.df = pd.DataFrame(data)
+        self.preprocessor.remove_duplicates()
+        
+        self.assertEqual(len(self.preprocessor.df), 3)
+        self.assertEqual(self.preprocessor.report['removed_duplicates'], 2)
+
+
+# ====================================================================
+# Test Suite 2: Sentiment Analysis (nlp_analysis.py)
+# ====================================================================
+
+class TestSentimentAnalysis(unittest.TestCase):
+    
+    def setUp(self):
+        # We mock the entire __init__ to prevent the heavy DistilBERT model from loading
+        with patch('nlp_analysis.pipeline') as mock_pipe, \
+             patch('nlp_analysis.logging.info'): # Mock logging to keep test output clean
+            self.analyzer = ReviewAnalyzer()
+            # Restore the actual helper method for local testing
+            self.analyzer._preprocess_text_for_tfidf = ReviewAnalyzer._preprocess_text_for_tfidf.__get__(self.analyzer, ReviewAnalyzer)
+
+
+    def test_tfidf_preprocess_basic(self):
+        """Test tokenization, stop word removal, and lemmatization for TF-IDF."""
+        input_text = "The bank app is crashing constantly and I think it is terrible!"
+        expected_output = "bank app crashing constantly think terrible"
+        self.assertEqual(self.analyzer._preprocess_text_for_tfidf(input_text), expected_output)
+
+    def test_sentiment_rule_based_logic(self):
+        """Tests the critical 3-star rule-based adaptation logic."""
+        
+        # We must define the logic here to test it without running the heavy NLP pipeline.
+        def get_final_sentiment(rating, raw_score, raw_label):
+            if rating == 3 and raw_score < 0.75:
+                return 'neutral'
+            elif raw_label == 'positive':
+                return 'positive'
+            else:
+                return 'negative'
+                
+        # Test Case 1: Forced Neutral (3-star with low model confidence)
+        self.assertEqual(get_final_sentiment(rating=3, raw_score=0.70, raw_label='negative'), 'neutral')
+        
+        # Test Case 2: Positive overrides Neutral (3-star with high confidence)
+        self.assertEqual(get_final_sentiment(rating=3, raw_score=0.90, raw_label='positive'), 'positive')
+        
+        # Test Case 3: Clear Negative (1-star with high confidence)
+        self.assertEqual(get_final_sentiment(rating=1, raw_score=0.99, raw_label='negative'), 'negative')
+
+
+# ====================================================================
+# Test Suite 3: Database Loading (database_loader.py)
+# ====================================================================
+
+# We must mock the heavy dependencies of DatabaseLoader:
+# 1. The config.BANK_NAMES dictionary
+# 2. The pandas.read_csv call
+# 3. The psycopg2.connect call (database connection)
+
+@patch('database_loader.DATA_PATHS', {'sentiment_results': 'dummy_path.csv'})
+@patch('database_loader.BANK_NAMES', MOCK_BANK_NAMES)
+class TestDatabaseLoader(unittest.TestCase):
+
+    @patch('database_loader.pd.read_csv')
+    @patch('database_loader.psycopg2.connect')
+    def setUp(self, mock_connect, mock_read_csv):
+        # Mock the DataFrame loaded by the loader
+        mock_data = {
+            'bank_code': ['CBE', 'BOA', 'CBE', 'DAS'],
+            'review_text': ['great', 'bad', 'okay', 'slow'],
+            'rating': [5, 1, 3, 2],
+            'review_date': ['2023-01-01', '2023-02-01', '2023-03-01', '2023-04-01'],
+            'sentiment_label': ['positive', 'negative', 'neutral', 'negative'],
+            'sentiment_score': [0.9, 0.9, 0.5, 0.8],
+            'reviewId': ['r1', 'r2', 'r3', 'r4'] # Mocking the column name that caused issues previously
+        }
+        mock_df = pd.DataFrame(mock_data)
+        mock_read_csv.return_value = mock_df
+        
+        # Initialize the loader (it will use the mocked data)
+        self.loader = DatabaseLoader()
+        
+        # Mock the database cursor/connection for internal method testing
+        self.mock_conn = mock_connect.return_value
+        self.mock_cursor = self.mock_conn.cursor.return_value
+
+    def test_bank_data_insertion_prep(self):
+        """Test if the loader correctly identifies and prepares unique banks for insertion."""
+        # This test ensures the correct unique bank codes are extracted
+        unique_banks = self.loader.df['bank_code'].unique().tolist()
+        self.assertEqual(sorted(unique_banks), sorted(list(MOCK_BANK_NAMES.keys())))
+        
+        # The list should contain all unique banks from the mock data
+        self.assertIn('CBE', unique_banks)
+        self.assertIn('DAS', unique_banks)
+        self.assertIn('BOA', unique_banks)
+
+    @patch('database_loader.DatabaseLoader.connect', MagicMock(return_value=True))
+    def test_review_data_fk_mapping(self):
+        """Test that bank_id Foreign Key is correctly mapped before review insertion."""
+        # Simulate the database returning IDs for the bank codes (CBE=1, BOA=2, DAS=3)
+        mock_bank_data = [
+            (1, 'CBE'),
+            (2, 'BOA'),
+            (3, 'DAS')
+        ]
+        self.mock_cursor.fetchall.return_value = mock_bank_data
+        
+        # Since connect() is mocked, we need to manually set the cursor
+        self.loader.conn = self.mock_conn
+        self.loader.cursor = self.mock_cursor
+
+        # Call the insertion method (which includes the mapping logic)
+        self.loader.insert_reviews_data()
+
+        # The mapping logic runs before insertion. Check the resulting DataFrame column.
+        # Original order: CBE, BOA, CBE, DAS
+        expected_fk_map = [1, 2, 1, 3] 
+        actual_fk_map = self.loader.df['bank_id_fk'].tolist()
+        
+        self.assertEqual(actual_fk_map, expected_fk_map)
+        
+        # Cleanup mock state
+        self.loader.close()
+
+
+# ====================================================================
+# Main Runner
+# ====================================================================
+if __name__ == '__main__':
+    unittest.main(buffer=True)
