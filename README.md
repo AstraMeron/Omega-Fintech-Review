@@ -102,3 +102,20 @@ The analysis clustered user feedback into critical pain points, consistently fin
 * **Affected Banks:** CBE, BOA, Dashen
 * **Example Keywords:** `app`, `update`, `bad`
 
+### Database Schema (Task 3)
+
+The project utilizes a PostgreSQL relational database (`bank_reviews`) with two tables to store and relate the analyzed data:
+
+| Table Name | Column Name | Data Type | Key/Notes |
+| :--- | :--- | :--- | :--- |
+| **banks** | `bank_id` | SERIAL | PRIMARY KEY |
+| | `bank_code` | VARCHAR(10) | UNIQUE (e.g., 'CBE') |
+| | `bank_name` | VARCHAR(100) | |
+| **reviews** | `review_id` | SERIAL | PRIMARY KEY |
+| | `bank_id` | INTEGER | FOREIGN KEY (references banks) |
+| | `review_text` | TEXT | |
+| | `rating` | INTEGER | |
+| | `review_date` | DATE | |
+| | `sentiment_label` | VARCHAR(20) | |
+| | `sentiment_score` | FLOAT | |
+| | `source` | VARCHAR(50) | |
