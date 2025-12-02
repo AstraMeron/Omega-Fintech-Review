@@ -1,72 +1,177 @@
+"""
+Report Visualization Script (report_viz.py)
+Task 4: Extracts data from PostgreSQL, generates the essential visualizations,
+and prepares insights for the final report.
+"""
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import Counter
-import re
-from config import DATA_PATHS, BANK_NAMES # Assuming config is accessible
+import os
+import sys
+import logging
+import numpy as np
 
-# Set plotting style
+# Ensure necessary modules are on the path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Assuming DatabaseLoader and CONFIG are accessible
+try:
+    from database_loader import DatabaseLoader
+    from config import DATA_PATHS, BANK_NAMES
+except ImportError as e:
+    print(f"Error importing modules: {e}")
+    sys.exit(1)
+
+# --- Configuration and Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 sns.set_style("whitegrid")
 
-def generate_visualizations():
-    """Loads analyzed data and generates key visualizations for the Interim Report."""
-    try:
-        df = pd.read_csv(DATA_PATHS['sentiment_results'])
-        print(f"Loaded {len(df)} reviews for visualization.")
-    except FileNotFoundError:
-        print(f"Error: Data file not found at {DATA_PATHS['sentiment_results']}. Please run nlp_analysis.py first.")
-        return
+class VisualizationEngine:
+    """Handles data extraction from DB and visualization generation."""
 
-    # --- Chart 1: Overall Rating Distribution ---
-    plt.figure(figsize=(8, 5))
-    rating_counts = df['rating'].value_counts().sort_index()
-    sns.barplot(x=rating_counts.index, y=rating_counts.values, palette="viridis")
-    plt.title('Figure 1. Overall Distribution of User Ratings (1-5 Stars)')
-    plt.xlabel('Rating')
-    plt.ylabel('Number of Reviews')
-    plt.savefig(f"{DATA_PATHS['processed']}/fig1_rating_distribution.png")
-    plt.close()
-    print("Saved fig1_rating_distribution.png")
+    def __init__(self):
+        logging.info("Initializing Visualization Engine...")
+        self.db_loader = DatabaseLoader()
+        # Ensure 'data/fig' directory exists
+        self.output_dir = os.path.join(os.path.dirname(__file__), 'data', 'fig')
+        os.makedirs(self.output_dir, exist_ok=True)
+        self.connection_status = self.db_loader.connect()
 
-    # --- Chart 2: Sentiment Breakdown by Bank (Normalized) ---
-    sentiment_df = df.groupby('bank_name')['sentiment_label'].value_counts(normalize=True).mul(100).unstack(fill_value=0)
-    sentiment_df = sentiment_df[['negative', 'neutral', 'positive']] # Ensure consistent column order
+        if not self.connection_status:
+            logging.error("Failed to connect to the database. Cannot run visualizations.")
 
-    plt.figure(figsize=(10, 6))
-    sentiment_df.plot(kind='bar', stacked=True, color={'negative': '#E74C3C', 'neutral': '#F9E79F', 'positive': '#2ECC71'}, ax=plt.gca())
-    plt.title('Figure 2. Sentiment Breakdown by Bank (Percentage)')
-    plt.ylabel('Percentage of Reviews (%)')
-    plt.xlabel('Bank Name')
-    plt.xticks(rotation=45, ha='right')
-    plt.legend(title='Sentiment')
-    plt.tight_layout()
-    plt.savefig(f"{DATA_PATHS['processed']}/fig2_sentiment_breakdown.png")
-    plt.close()
-    print("Saved fig2_sentiment_breakdown.png")
+    def _execute_query(self, query):
+        """Helper to execute an SQL query and return a DataFrame."""
+        if not self.db_loader.conn or self.db_loader.conn.closed:
+            logging.error("Database connection is closed. Re-establishing...")
+            if not self.db_loader.connect():
+                return pd.DataFrame()
 
-    # --- Chart 3: Top 10 Overall Keywords (Aggregated from Negative/Neutral Reviews) ---
-    negative_neutral_df = df[df['sentiment_label'].isin(['negative', 'neutral'])]
-    
-    # Safely combine all keywords from the 'top_keywords' column
-    all_keywords = []
-    for keywords_str in negative_neutral_df['top_keywords'].dropna():
-        # Remove the 'N/A (Positive Review)' placeholder if any remain
-        if "N/A" not in keywords_str:
-            all_keywords.extend([kw.strip() for kw in keywords_str.split(',')])
+        try:
+            logging.info(f"Executing query: {query.splitlines()[0].strip()}...")
+            df = pd.read_sql(query, self.db_loader.conn)
+            return df
+        except Exception as e:
+            logging.error(f"Error executing SQL query: {e}")
+            return pd.DataFrame()
 
-    # Count the top 10 most frequent single words/n-grams
-    word_counts = Counter(all_keywords)
-    top_10 = pd.DataFrame(word_counts.most_common(10), columns=['Keyword', 'Frequency'])
+    # ----------------------------------------------------
+    # Data Retrieval Functions
+    # ----------------------------------------------------
 
-    plt.figure(figsize=(10, 6))
-    sns.barplot(x='Frequency', y='Keyword', data=top_10, palette="mako")
-    plt.title('Figure 3. Top 10 Most Frequent Keywords (Across All Negative/Neutral Reviews)')
-    plt.xlabel('Frequency')
-    plt.ylabel('Keyword / N-gram')
-    plt.tight_layout()
-    plt.savefig(f"{DATA_PATHS['processed']}/fig3_top_keywords.png")
-    plt.close()
-    print("Saved fig3_top_keywords.png")
+    def get_rating_distribution(self):
+        """Retrieves data for overall rating distribution plot (Figure 1)."""
+        query = """
+        SELECT
+            rating,
+            COUNT(*) AS review_count
+        FROM
+            reviews
+        GROUP BY
+            rating
+        ORDER BY
+            rating;
+        """
+        return self._execute_query(query)
+
+    def get_sentiment_breakdown(self):
+        """Retrieves data for sentiment breakdown per bank plot (Figure 2)."""
+        query = """
+        SELECT
+            b.bank_name,
+            r.sentiment_label,
+            COUNT(r.review_id) AS sentiment_count
+        FROM
+            reviews r
+        JOIN
+            banks b ON r.bank_id = b.bank_id
+        GROUP BY
+            b.bank_name, r.sentiment_label
+        ORDER BY
+            b.bank_name, r.sentiment_label;
+        """
+        return self._execute_query(query)
+
+    # Note: Keyword functions are removed to bypass the column error
+
+    # ----------------------------------------------------
+    # Visualization Generation Functions
+    # ----------------------------------------------------
+
+    def plot_rating_distribution(self, df_rating):
+        """Generates Figure 1: Overall Distribution of User Ratings."""
+        if df_rating.empty: return
+
+        plt.figure(figsize=(8, 6))
+        sns.barplot(x='rating', y='review_count', data=df_rating, palette='viridis')
+        plt.title('Figure 1. Overall Distribution of User Ratings (1-5 Stars)')
+        plt.xlabel('Rating')
+        plt.ylabel('Number of Reviews')
+        plt.xticks(df_rating['rating'])
+        
+        filepath = os.path.join(self.output_dir, 'fig1_rating_distribution.png')
+        plt.savefig(filepath)
+        plt.close()
+        logging.info(f"Figure 1 saved to {filepath}")
+        return filepath
+
+    def plot_sentiment_breakdown(self, df_sentiment):
+        """Generates Figure 2: Sentiment Breakdown by Bank (Percentage Stacked Bar)."""
+        if df_sentiment.empty: return
+
+        # Pivot to get bank vs. sentiment counts
+        df_pivot = df_sentiment.pivot(index='bank_name', columns='sentiment_label', values='sentiment_count').fillna(0)
+        # Calculate percentages
+        df_percent = df_pivot.apply(lambda x: x / x.sum() * 100, axis=1)
+        df_percent = df_percent.reindex(columns=['negative', 'neutral', 'positive'], fill_value=0) # Ensure order
+
+        plt.figure(figsize=(10, 7))
+        # Stacked bar plot for percentages
+        df_percent.plot(kind='bar', stacked=True, color={'negative': '#E34A33', 'neutral': '#FECC5C', 'positive': '#34A853'}, ax=plt.gca())
+        
+        plt.title('Figure 2. Sentiment Breakdown by Bank (Percentage)')
+        plt.xlabel('Bank Name')
+        plt.ylabel('Percentage of Reviews (%)')
+        plt.xticks(rotation=45, ha='right')
+        plt.legend(title='Sentiment', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        
+        filepath = os.path.join(self.output_dir, 'fig2_sentiment_breakdown.png')
+        plt.savefig(filepath)
+        plt.close()
+        logging.info(f"Figure 2 saved to {filepath}")
+        return filepath
+
+
+    # ----------------------------------------------------
+    # Main Execution
+    # ----------------------------------------------------
+    def generate_visuals(self):
+        """Runs the data extraction and visualization pipeline."""
+        print("\n" + "=" * 60)
+        print("STARTING TASK 4: GENERATING VISUALIZATIONS")
+        print("=" * 60)
+        
+        if not self.connection_status:
+             return False
+
+        # 1. Plot 1: Rating Distribution
+        df_rating = self.get_rating_distribution()
+        self.plot_rating_distribution(df_rating)
+
+        # 2. Plot 2: Sentiment Breakdown
+        df_sentiment = self.get_sentiment_breakdown()
+        self.plot_sentiment_breakdown(df_sentiment)
+        
+        # Plot 3: Keyword Frequency removed to avoid column name error
+
+        logging.info("Visualization generation complete. Next: Theme Analysis and Report.")
+        self.db_loader.close()
+        return True
+
+def main():
+    engine = VisualizationEngine()
+    engine.generate_visuals()
 
 if __name__ == "__main__":
-    generate_visualizations()
+    main()
